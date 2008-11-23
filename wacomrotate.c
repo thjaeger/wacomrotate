@@ -9,6 +9,7 @@
 Display *dpy;
 Rotation r = 0;
 int subpixel = 0;
+int force = 0;
 
 void rotate() {
 	Rotation old_r = r;
@@ -60,7 +61,8 @@ int check_wacom() {
 void usage(const char *me) {
 	printf("Usage: %s [OPTION]...\n\n", me);
 	printf("Options:\n");
-	printf("  -s, --subpixel         Directory for config files\n");
+	printf("  -s, --subpixel         Also adjust the orientation of subpixel smoothing\n");
+	printf("  -f, --force            Rotate wacom input even if Tablet PC is not detected\n");
 	printf("  -h, --help             Display this help and exit\n");
 }
 
@@ -68,14 +70,18 @@ void parse_opts(int argc, char *argv[]) {
 	static struct option long_opts[] = {
 		{"help",0,0,'h'},
 		{"subpixel",0,0,'s'},
+		{"force",0,0,'f'},
 		{0,0,0,0}
 	};
 
 	char opt;
-	while ((opt = getopt_long(argc, argv, "sh", long_opts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "shf", long_opts, 0)) != -1) {
 		switch (opt) {
 			case 's':
 				subpixel = 1;
+				break;
+			case 'f':
+				force = 1;
 				break;
 			case 'h':
 			default:
@@ -92,8 +98,8 @@ int main(int argc, char *argv[]) {
 
 	parse_opts(argc, argv);
 
-	if (!check_wacom()) {
-		fprintf(stderr, "Not a Tablet PC, exiting...\n");
+	if (!force && !check_wacom()) {
+		fprintf(stderr, "Not a Tablet PC, exiting... (use -f to overwrite)\n");
 		exit(EXIT_SUCCESS);
 	}
 
