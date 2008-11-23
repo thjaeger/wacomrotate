@@ -15,7 +15,7 @@
 DESTDIR  =
 PREFIX   = /usr/local
 BINDIR   = $(PREFIX)/bin
-AUTODIR  = $(PREFIX)/etc/xdg/autostart
+AUTODIR  = /etc/xdg/autostart
 OFLAGS   = -Os
 CFLAGS   = -Wall
 LIBS     = -lX11 -lXrandr
