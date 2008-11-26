@@ -25,8 +25,11 @@ Display *dpy;
 Rotation r = 0;
 int subpixel = 0;
 int force = 0;
+const char *device_name[] = { "stylus", "touch" };
+int device_n = 1;
 
 void rotate() {
+	int i;
 	Rotation old_r = r;
 	char buf[256];
 	char *r_name, *order;
@@ -54,9 +57,11 @@ void rotate() {
 		default:
 			return;
 	}
-	snprintf(buf, sizeof(buf), "xsetwacom set stylus rotate %s", r_name);
-	if (system(buf) == -1)
-		fprintf(stderr, "Error: system() failed\n");
+	for (i = 0; i < device_n; i++) {
+		snprintf(buf, sizeof(buf), "xsetwacom set %s rotate %s", device_name[i], r_name);
+		if (system(buf) == -1)
+			fprintf(stderr, "Error: system() failed\n");
+	}
 	if (!subpixel)
 		return;
 	snprintf(buf, sizeof(buf), "gconftool -t string -s /desktop/gnome/font_rendering/rgba_order %s", order);
@@ -78,6 +83,7 @@ void usage(const char *me) {
 	printf("Options:\n");
 	printf("  -s, --subpixel         Also adjust the orientation of subpixel smoothing\n");
 	printf("  -f, --force            Rotate wacom input even if Tablet PC is not detected\n");
+	printf("  -t, --touch            Also issue xsetwacom command for a 'touch' device");
 	printf("  -h, --help             Display this help and exit\n");
 }
 
@@ -86,17 +92,21 @@ void parse_opts(int argc, char *argv[]) {
 		{"help",0,0,'h'},
 		{"subpixel",0,0,'s'},
 		{"force",0,0,'f'},
+		{"touch",0,0,'t'},
 		{0,0,0,0}
 	};
 
 	char opt;
-	while ((opt = getopt_long(argc, argv, "shf", long_opts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "shft", long_opts, 0)) != -1) {
 		switch (opt) {
 			case 's':
 				subpixel = 1;
 				break;
 			case 'f':
 				force = 1;
+				break;
+			case 't':
+				device_n = 2;
 				break;
 			case 'h':
 			default:
