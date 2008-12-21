@@ -18,7 +18,7 @@ BINDIR   = $(PREFIX)/bin
 AUTODIR  = /etc/xdg/autostart
 OFLAGS   = -Os
 CFLAGS   = -Wall
-LIBS     = -lX11 -lXrandr
+LIBS     = -lX11 -lXi -lXrandr
 
 BINARY   = wacomrotate
 SOURCE   = wacomrotate.c

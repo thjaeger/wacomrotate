@@ -15,18 +15,21 @@
  */
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
+#include <X11/extensions/XInput.h>
+
 #include <stdlib.h>
 #include <stdio.h>
-#include <unistd.h>
 #include <string.h>
 #include <getopt.h>
 
 Display *dpy;
 Rotation r = 0;
 int subpixel = 0;
-int force = 0;
+int verbosity = 0;
+
+const int device_n = 2;
 const char *device_name[] = { "stylus", "touch" };
-int device_n = 1;
+int device_present[] = { 0, 0 };
 
 void rotate() {
 	int i;
@@ -70,43 +73,46 @@ void rotate() {
 }
 
 int check_wacom() {
-	char buf[10];
-	int n = readlink("/dev/input/wacom", buf, 9);
-	if (n < 0)
-		return 0;
-	buf[n] = '\0';
-	return !strcmp("/dev/ttyS", buf);
+	int i, j, n;
+	int found_device = 0;
+	XDeviceInfo *devs = XListInputDevices(dpy, &n);
+	for (i = 0; i < n; i++)
+		for (j = 0; j < device_n; j++)
+			if (!strcmp(devs[i].name, device_name[j])) {
+				if (verbosity >= 1)
+					printf("Found device \"%s\".\n", devs[i].name);
+				device_present[j] = 1;
+				found_device = 1;
+				break;
+			}
+	XFreeDeviceList(devs);
+	return found_device;
 }
 
 void usage(const char *me) {
 	printf("Usage: %s [OPTION]...\n\n", me);
 	printf("Options:\n");
 	printf("  -s, --subpixel         Also adjust the orientation of subpixel smoothing\n");
-	printf("  -f, --force            Rotate wacom input even if Tablet PC is not detected\n");
-	printf("  -t, --touch            Also issue xsetwacom command for a 'touch' device");
+	printf("  -v, --verbose          Increase verbosity\n");
 	printf("  -h, --help             Display this help and exit\n");
 }
 
 void parse_opts(int argc, char *argv[]) {
 	static struct option long_opts[] = {
-		{"help",0,0,'h'},
 		{"subpixel",0,0,'s'},
-		{"force",0,0,'f'},
-		{"touch",0,0,'t'},
+		{"verbose",0,0,'v'},
+		{"help",0,0,'h'},
 		{0,0,0,0}
 	};
 
 	char opt;
-	while ((opt = getopt_long(argc, argv, "shft", long_opts, 0)) != -1) {
+	while ((opt = getopt_long(argc, argv, "svh", long_opts, 0)) != -1) {
 		switch (opt) {
 			case 's':
 				subpixel = 1;
 				break;
-			case 'f':
-				force = 1;
-				break;
-			case 't':
-				device_n = 2;
+			case 'v':
+				verbosity++;
 				break;
 			case 'h':
 			default:
@@ -123,11 +129,6 @@ int main(int argc, char *argv[]) {
 
 	parse_opts(argc, argv);
 
-	if (!force && !check_wacom()) {
-		fprintf(stderr, "Not a Tablet PC, exiting... (use -f to overwrite)\n");
-		exit(EXIT_SUCCESS);
-	}
-
 	dpy = XOpenDisplay(NULL);
 	if (!dpy) {
 		fprintf(stderr, "Couldn't open display %s.\n", XDisplayName(NULL));
@@ -137,6 +138,11 @@ int main(int argc, char *argv[]) {
 	if (!XRRQueryExtension(dpy, &event_basep, &error_basep)) {
 		fprintf(stderr, "RandR not available.\n");
 		exit(EXIT_FAILURE);
+	}
+
+	if (!check_wacom()) {
+		fprintf(stderr, "No wacom devices found, exiting...\n");
+		exit(EXIT_SUCCESS);
 	}
 
 	XRRSelectInput(dpy, DefaultRootWindow(dpy), RRScreenChangeNotifyMask);
