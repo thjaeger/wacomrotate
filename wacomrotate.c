@@ -23,13 +23,12 @@
 #include <getopt.h>
 
 Display *dpy;
-Rotation r = 0;
+Rotation r = RR_Rotate_0;
 int subpixel = 0;
 int verbosity = 0;
 
-const int device_n = 2;
-const char *device_name[] = { "stylus", "touch" };
-int device_present[] = { 0, 0 };
+char *device_name[256];
+int device_n = 0;
 
 void rotate() {
 	int i;
@@ -58,10 +57,13 @@ void rotate() {
 			order = "vbgr";
 			break;
 		default:
+			fprintf(stderr, "Warning: XRRRotations() returned garbage\n");
 			return;
 	}
+	if (verbosity >= 1)
+		printf("New orientation: %s\n", r_name);
 	for (i = 0; i < device_n; i++) {
-		snprintf(buf, sizeof(buf), "xsetwacom set %s rotate %s", device_name[i], r_name);
+		snprintf(buf, sizeof(buf), "xsetwacom set \"%s\" rotate %s", device_name[i], r_name);
 		if (system(buf) == -1)
 			fprintf(stderr, "Error: system() failed\n");
 	}
@@ -72,21 +74,26 @@ void rotate() {
 		fprintf(stderr, "Error: system() failed\n");
 }
 
-int check_wacom() {
-	int i, j, n;
-	int found_device = 0;
+void check_wacom() {
+	int i, n;
+	while (device_n > 0)
+		free(device_name[--device_n]);
 	XDeviceInfo *devs = XListInputDevices(dpy, &n);
-	for (i = 0; i < n; i++)
-		for (j = 0; j < device_n; j++)
-			if (!strcmp(devs[i].name, device_name[j])) {
-				if (verbosity >= 1)
-					printf("Found device \"%s\".\n", devs[i].name);
-				device_present[j] = 1;
-				found_device = 1;
-				break;
-			}
+	for (i = 0; i < n; i++) {
+		if (
+				!strcmp(devs[i].name, "stylus") ||
+				!strcmp(devs[i].name, "touch") ||
+				strstr(devs[i].name, "wacom") ||
+				strstr(devs[i].name, "Wacom")
+		   ) {
+			if (verbosity >= 1)
+				printf("Found device \"%s\".\n", devs[i].name);
+			device_name[device_n++] = strdup(devs[i].name);
+		}
+		if (device_n >= sizeof(device_name)/sizeof(*device_name))
+			break;
+	}
 	XFreeDeviceList(devs);
-	return found_device;
 }
 
 void usage(const char *me) {
@@ -124,8 +131,10 @@ void parse_opts(int argc, char *argv[]) {
 
 int main(int argc, char *argv[]) {
 	XEvent ev;
-	int event_basep;
-	int error_basep;
+	int randr_event, randr_error;
+	int xi_major, xi_event, xi_error;
+	int event_presence;
+	XEventClass presence_class;
 
 	parse_opts(argc, argv);
 
@@ -135,23 +144,30 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 
-	if (!XRRQueryExtension(dpy, &event_basep, &error_basep)) {
+	if (!XRRQueryExtension(dpy, &randr_event, &randr_error)) {
 		fprintf(stderr, "RandR not available.\n");
 		exit(EXIT_FAILURE);
 	}
-
-	if (!check_wacom()) {
-		fprintf(stderr, "No wacom devices found, exiting...\n");
-		exit(EXIT_SUCCESS);
-	}
-
 	XRRSelectInput(dpy, DefaultRootWindow(dpy), RRScreenChangeNotifyMask);
+
+	if (!XQueryExtension(dpy, INAME, &xi_major, &xi_event, &xi_error)) {
+		fprintf(stderr, "XInput not available.\n");
+		exit(EXIT_FAILURE);
+	}
+	DevicePresence(dpy, event_presence, presence_class);
+	XSelectExtensionEvent(dpy, DefaultRootWindow(dpy), &presence_class, 1);
+
+
+	check_wacom();
+	rotate();
 
 	while (1) {
 		XNextEvent(dpy, &ev);
-		if (ev.type == event_basep) {
+		if (ev.type == randr_event) {
 			XRRUpdateConfiguration(&ev);
 			rotate();
+		} else if (ev.type == event_presence) {
+			check_wacom();
 		}
 	}
 }
