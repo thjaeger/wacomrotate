@@ -16,44 +16,72 @@
 #include <X11/Xlib.h>
 #include <X11/extensions/Xrandr.h>
 #include <X11/extensions/XInput.h>
+#include <X11/extensions/XInput2.h>
 
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 #include <getopt.h>
 
+#define WACOM_PROP_ROTATION "Wacom Rotation"
+
 Display *dpy;
+
 Rotation r = RR_Rotate_0;
+int wacom_rotation;
+
 int subpixel = 0;
 int verbosity = 0;
 
-char *device_name[256];
-int device_n = 0;
+int opcode;
+
+void rotate_device(int dev) {
+	Atom prop, type;
+	int format;
+	unsigned char* data;
+	unsigned long nitems, bytes_after;
+	XDevice fake_dev;
+	fake_dev.device_id = dev;
+
+	prop = XInternAtom(dpy, WACOM_PROP_ROTATION, True);
+	if (!prop)
+		return;
+
+	XGetDeviceProperty(dpy, &fake_dev, prop, 0, 1000, False, AnyPropertyType,
+			&type, &format, &nitems, &bytes_after, &data);
+
+	if (nitems == 0 || format != 8)
+		return;
+
+	*data = wacom_rotation;
+	XChangeDeviceProperty(dpy, &fake_dev, prop, type, format,
+			PropModeReplace, data, nitems);
+}
 
 void rotate() {
-	int i;
 	Rotation old_r = r;
 	char buf[256];
-	char *r_name, *order;
+	char *order;
+	int wacom_rotation;
 
 	XRRRotations(dpy, DefaultScreen(dpy), &r);
 	if (old_r == r)
 		return;
 	switch (r) {
 		case RR_Rotate_0:
-			r_name = "none";
+			wacom_rotation = 0;
 			order = "rgb";
 			break;
 		case RR_Rotate_90:
-			r_name = "ccw";
+			wacom_rotation = 2;
 			order = "vrgb";
 			break;
 		case RR_Rotate_180:
-			r_name = "half";
+			wacom_rotation = 3;
 			order = "bgr";
 			break;
 		case RR_Rotate_270:
-			r_name = "cw";
+			wacom_rotation = 1;
 			order = "vbgr";
 			break;
 		default:
@@ -61,39 +89,19 @@ void rotate() {
 			return;
 	}
 	if (verbosity >= 1)
-		printf("New orientation: %s\n", r_name);
-	for (i = 0; i < device_n; i++) {
-		snprintf(buf, sizeof(buf), "xsetwacom set \"%s\" rotate %s", device_name[i], r_name);
-		if (system(buf) == -1)
-			fprintf(stderr, "Error: system() failed\n");
-	}
+		printf("New orientation: %d\n", wacom_rotation);
+
+	int n;
+	XIDeviceInfo *info = XIQueryDevice(dpy, XIAllDevices, &n);
+	for (int i = 0; i < n; i++)
+		rotate_device(info[i].deviceid);
+	XIFreeDeviceInfo(info);
+
 	if (!subpixel)
 		return;
 	snprintf(buf, sizeof(buf), "gconftool -t string -s /desktop/gnome/font_rendering/rgba_order %s", order);
 	if (system(buf) == -1)
 		fprintf(stderr, "Error: system() failed\n");
-}
-
-void check_wacom() {
-	int i, n;
-	while (device_n > 0)
-		free(device_name[--device_n]);
-	XDeviceInfo *devs = XListInputDevices(dpy, &n);
-	for (i = 0; i < n; i++) {
-		if (
-				!strcmp(devs[i].name, "stylus") ||
-				!strcmp(devs[i].name, "touch") ||
-				strstr(devs[i].name, "wacom") ||
-				strstr(devs[i].name, "Wacom")
-		   ) {
-			if (verbosity >= 1)
-				printf("Found device \"%s\".\n", devs[i].name);
-			device_name[device_n++] = strdup(devs[i].name);
-		}
-		if (device_n >= sizeof(device_name)/sizeof(*device_name))
-			break;
-	}
-	XFreeDeviceList(devs);
 }
 
 void usage(const char *me) {
@@ -129,12 +137,34 @@ void parse_opts(int argc, char *argv[]) {
 	}
 }
 
+void hierarchy_changed(XIHierarchyEvent *event) {
+	for (int i = 0; i < event->num_info; i++) {
+		XIHierarchyInfo *info = event->info + i;
+		if (info->flags & XISlaveAdded)
+			rotate_device(info->deviceid);
+	}
+}
+
+void init_wacom() {
+	int major = 2, minor = 0, event, error;
+	if (!XQueryExtension(dpy, "XInputExtension", &opcode, &event, &error) ||
+			XIQueryVersion(dpy, &major, &minor) == BadRequest ||
+			major < 2) {
+		printf("Error: This version of wacomrotate needs an XInput 2.0-aware X server.\n");
+		exit(EXIT_FAILURE);
+	}
+
+	XIEventMask hier_mask;
+	unsigned char data[2] = { 0, 0 };
+	hier_mask.deviceid = XIAllDevices;
+	hier_mask.mask = data;
+	hier_mask.mask_len = sizeof(data);
+	XISetMask(hier_mask.mask, XI_HierarchyChanged);
+	XISelectEvents(dpy, DefaultRootWindow(dpy), &hier_mask, 1);
+}
+
 int main(int argc, char *argv[]) {
-	XEvent ev;
 	int randr_event, randr_error;
-	int xi_major, xi_event, xi_error;
-	int event_presence;
-	XEventClass presence_class;
 
 	parse_opts(argc, argv);
 
@@ -150,24 +180,22 @@ int main(int argc, char *argv[]) {
 	}
 	XRRSelectInput(dpy, DefaultRootWindow(dpy), RRScreenChangeNotifyMask);
 
-	if (!XQueryExtension(dpy, INAME, &xi_major, &xi_event, &xi_error)) {
-		fprintf(stderr, "XInput not available.\n");
-		exit(EXIT_FAILURE);
-	}
-	DevicePresence(dpy, event_presence, presence_class);
-	XSelectExtensionEvent(dpy, DefaultRootWindow(dpy), &presence_class, 1);
-
-
-	check_wacom();
+	init_wacom();
 	rotate();
 
 	while (1) {
+		XEvent ev;
 		XNextEvent(dpy, &ev);
 		if (ev.type == randr_event) {
 			XRRUpdateConfiguration(&ev);
 			rotate();
-		} else if (ev.type == event_presence) {
-			check_wacom();
+		} else if (ev.type == GenericEvent &&
+				ev.xcookie.extension == opcode &&
+				XGetEventData(dpy, &ev.xcookie)) {
+			XIDeviceEvent *device_event = (XIDeviceEvent *)ev.xcookie.data;
+			if (device_event->evtype == XI_HierarchyChanged)
+				hierarchy_changed((XIHierarchyEvent *)device_event);
+			XFreeEventData(dpy, &ev.xcookie);
 		}
 	}
 }

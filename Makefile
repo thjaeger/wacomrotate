@@ -17,7 +17,7 @@ PREFIX   = /usr/local
 BINDIR   = $(PREFIX)/bin
 AUTODIR  = /etc/xdg/autostart
 OFLAGS   = -Os
-CFLAGS   = -Wall
+CFLAGS   = -Wall -std=c99
 LIBS     = -lX11 -lXi -lXrandr
 
 BINARY   = wacomrotate
