@@ -38,7 +38,7 @@ int opcode;
 void rotate_device(int dev) {
 	Atom prop, type;
 	int format;
-	unsigned char* data;
+	unsigned char* data = NULL;
 	unsigned long nitems, bytes_after;
 	XDevice fake_dev;
 	fake_dev.device_id = dev;
@@ -56,13 +56,14 @@ void rotate_device(int dev) {
 	*data = wacom_rotation;
 	XChangeDeviceProperty(dpy, &fake_dev, prop, type, format,
 			PropModeReplace, data, nitems);
+
+	free(data);
 }
 
 void rotate() {
 	Rotation old_r = r;
 	char buf[256];
 	char *order;
-	int wacom_rotation;
 
 	XRRRotations(dpy, DefaultScreen(dpy), &r);
 	if (old_r == r)
